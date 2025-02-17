@@ -31,8 +31,7 @@ export class User {
         const chatMessage = parsedMessage.chat_message;
         RoomManager.getInstance().receiveChatMessageAndBroadcast(this, chatMessage);
       } else if (parsedMessage.type == "DRAW") {
-        const wordToPaint = parsedMessage.word;
-        RoomManager.getInstance().handleDrawingRequest(this, wordToPaint);
+        RoomManager.getInstance().handleDrawingRequest(this);
       } else if (parsedMessage.type == "DRAWING") {
         const drawingData = parsedMessage.drawing_data;
         RoomManager.getInstance().handleDrawingStroke(this, drawingData);
