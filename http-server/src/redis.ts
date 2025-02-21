@@ -47,13 +47,15 @@ export const getDrawer = async (roomId: string) => {
   return stringifiedDrawer;
 };
 
-export const checkIfUsernameAlreadyExists = async (roomId: string, userName: string) => {
+export const checkIfUsernameAlreadyExistsAndGetParticipants = async (roomId: string, userName: string) => {
   const participantsForRoom = await redisClient.lRange(`participants:${roomId}`, 0, -1);
-  for (const stringifiedParticipant of participantsForRoom) {
-    const parsedParticipant = JSON.parse(stringifiedParticipant);
+  const parsedParticipants = participantsForRoom.map((stringifiedParticipant) => {
+    return JSON.parse(stringifiedParticipant);
+  });
+  for (const parsedParticipant of parsedParticipants) {
     if (parsedParticipant.name == userName) {
-      return true;
+      return { alreadyExists: true, participants: null };
     }
   }
-  return false;
+  return { alreadyExists: false, participants: parsedParticipants };
 };

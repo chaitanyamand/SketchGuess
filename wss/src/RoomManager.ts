@@ -35,7 +35,12 @@ export class RoomManager {
       name: userName,
       score: 0,
     };
-    await this.redisClient.lPush(`participants:${roomId}`, JSON.stringify(participantToEnqueue));
+    await this.redisClient.rPush(`participants:${roomId}`, JSON.stringify(participantToEnqueue));
+    const messageToBroadcast = {
+      type: "PARTICIPANT_JOINED",
+      user_name: userName,
+    };
+    this.broadcastToRoomExceptSender(roomId, messageToBroadcast, user);
   }
 
   private async removeUserFromRoom(user: User) {
@@ -53,6 +58,11 @@ export class RoomManager {
       }
     }
     await this.removeFromRedisParticipants(roomId, userName);
+    const messageToBroadcast = {
+      type: "PARTICIPANT_LEFT",
+      user_name: userName,
+    };
+    this.broadcastToRoom(roomId, messageToBroadcast);
   }
 
   private async removeFromRedisParticipants(roomId: string, userName: string) {
@@ -82,7 +92,7 @@ export class RoomManager {
     };
     this.participants.set(roomId, singleUserSet);
     await this.redisClient.sAdd("rooms", roomId);
-    await this.redisClient.lPush(`participants:${roomId}`, JSON.stringify(participantToEnqueue));
+    await this.redisClient.rPush(`participants:${roomId}`, JSON.stringify(participantToEnqueue));
     const messageToSend = {
       type: "CREATED",
       room_id: roomId,
@@ -104,11 +114,12 @@ export class RoomManager {
         score: oldParticipant.score + 1,
       };
       await this.redisClient.lRem(`participants:${roomId}`, 0, JSON.stringify(oldParticipant));
-      await this.redisClient.lPush(`participants:${roomId}`, JSON.stringify(newParticipant));
+      await this.redisClient.rPush(`participants:${roomId}`, JSON.stringify(newParticipant));
       await this.cleanupForRoom(roomId);
       const messageToBroadcast = {
         type: "SCORE",
         user_name: userName,
+        correct_word: correctAnswer,
       };
       this.broadcastToRoom(roomId, messageToBroadcast);
       return;
@@ -117,7 +128,7 @@ export class RoomManager {
       name: userName,
       message: chat,
     };
-    await this.redisClient.lPush(`chat:${roomId}`, JSON.stringify(chatToPush));
+    await this.redisClient.rPush(`chat:${roomId}`, JSON.stringify(chatToPush));
     const messageToBroadcast = {
       type: "CHAT",
       user_name: userName,
@@ -155,8 +166,12 @@ export class RoomManager {
     const userName = user.getUserName();
     const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
     if (drawerForRoom && drawerForRoom == userName) {
-      await this.redisClient.lPush(`drawing:${roomId}`, JSON.stringify(drawingData));
-      this.broadcastToRoomExceptSender(roomId, drawingData, user);
+      await this.redisClient.rPush(`drawing:${roomId}`, JSON.stringify(drawingData));
+      const messageToBroadcast = {
+        type: "DRAWING",
+        drawing_data: drawingData,
+      };
+      this.broadcastToRoomExceptSender(roomId, messageToBroadcast, user);
     }
   }
 
@@ -199,9 +214,10 @@ export class RoomManager {
     const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
     if (drawerForRoom && drawerForRoom == userName) {
       await this.cleanupForRoom(roomId);
-      user.emit({
+      const messageToBroadcast = {
         type: "DRAWER_LEFT",
-      });
+      };
+      this.broadcastToRoomExceptSender(roomId, messageToBroadcast, user);
     }
     await this.removeUserFromRoom(user);
   }

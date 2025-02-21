@@ -1,9 +1,10 @@
 import express, { RequestHandler } from "express";
-import { checkIfRoomIsValid, checkIfUsernameAlreadyExists, getDrawer, getQueue } from "./redis";
-
+import { checkIfRoomIsValid, checkIfUsernameAlreadyExistsAndGetParticipants, getDrawer, getQueue } from "./redis";
+import cors from "cors";
 const app = express();
 const PORT = 3000;
 
+app.use(cors());
 app.use(express.json());
 
 const roomDataHandler: RequestHandler = async (req: any, res: any) => {
@@ -25,14 +26,14 @@ const roomDataHandler: RequestHandler = async (req: any, res: any) => {
     });
   }
 
-  const isUsernameExisting = await checkIfUsernameAlreadyExists(roomId, userName);
-  if (isUsernameExisting) {
+  const isUsernameExistingAndParticipants = await checkIfUsernameAlreadyExistsAndGetParticipants(roomId, userName);
+  if (isUsernameExistingAndParticipants.alreadyExists) {
     return res.status(200).json({
       status: "error",
       message: "Username already exists for this room",
     });
   }
-
+  const participantsForRoom = isUsernameExistingAndParticipants.participants;
   const chatForRoom = await getQueue("chat", roomId);
   const drawingForRoom = await getQueue("drawing", roomId);
   const drawerForRoom = await getDrawer(roomId);
@@ -42,6 +43,7 @@ const roomDataHandler: RequestHandler = async (req: any, res: any) => {
     chat: chatForRoom ?? [],
     drawing: drawingForRoom ?? [],
     drawer: drawerForRoom ?? "No drawer",
+    participants: participantsForRoom ?? [],
   });
 };
 
