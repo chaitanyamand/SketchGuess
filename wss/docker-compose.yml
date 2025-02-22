@@ -1,0 +1,50 @@
+version: '3'
+
+services:
+  wss1:
+    image: pictionary-wss
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+
+  wss2:
+    image: pictionary-wss
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+
+  wss3:
+    image: pictionary-wss
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--bind", "0.0.0.0"]
+
+  wss-lb:
+    image: websocket-load-balancer  
+    ports:
+      - "80:80"
+    depends_on:
+      - wss1
+      - wss2
+      - wss3

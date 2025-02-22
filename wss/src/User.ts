@@ -19,22 +19,26 @@ export class User {
   private addListeners() {
     this.ws.on("message", async (message: string) => {
       //TODO :Change the type of param
-      const parsedMessage = JSON.parse(message);
-      if (parsedMessage.type == "CREATE") {
-        RoomManager.getInstance().createRoom(this);
-      } else if (parsedMessage.type == "JOIN") {
-        const roomId = parsedMessage.room_id;
-        RoomManager.getInstance().addUserToRoom(this, roomId);
-      } else if (parsedMessage.type == "REMOVE") {
-        RoomManager.getInstance().handleRemovalOfParticipant(this);
-      } else if (parsedMessage.type == "CHAT") {
-        const chatMessage = parsedMessage.chat_message;
-        RoomManager.getInstance().receiveChatMessageAndBroadcast(this, chatMessage);
-      } else if (parsedMessage.type == "DRAW") {
-        RoomManager.getInstance().handleDrawingRequest(this);
-      } else if (parsedMessage.type == "DRAWING") {
-        const drawingData = parsedMessage.drawing_data;
-        RoomManager.getInstance().handleDrawingStroke(this, drawingData);
+      try {
+        const parsedMessage = JSON.parse(message);
+        if (parsedMessage.type == "CREATE") {
+          RoomManager.getInstance().createRoom(this);
+        } else if (parsedMessage.type == "JOIN") {
+          const roomId = parsedMessage.room_id;
+          RoomManager.getInstance().addUserToRoom(this, roomId);
+        } else if (parsedMessage.type == "REMOVE") {
+          RoomManager.getInstance().handleRemovalOfParticipant(this);
+        } else if (parsedMessage.type == "CHAT") {
+          const chatMessage = parsedMessage.chat_message;
+          RoomManager.getInstance().receiveChatMessageAndBroadcast(this, chatMessage);
+        } else if (parsedMessage.type == "DRAW") {
+          RoomManager.getInstance().handleDrawingRequest(this);
+        } else if (parsedMessage.type == "DRAWING") {
+          const drawingData = parsedMessage.drawing_data;
+          RoomManager.getInstance().handleDrawingStroke(this, drawingData);
+        }
+      } catch (error) {
+        console.log(error);
       }
     });
   }

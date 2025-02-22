@@ -3,7 +3,7 @@ dotenv.config();
 
 const config = {
   redis: {
-    url: "redis://localhost:6380",
+    url: "redis://host.docker.internal:6380",
   },
 };
 

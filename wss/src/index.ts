@@ -1,10 +1,21 @@
 import { WebSocketServer } from "ws";
 import { UserManager } from "./UserManager";
+import { subscriberRedisClient } from "./redis";
+import { RoomManager } from "./RoomManager";
+
+const PORT = parseInt(process.env.PORT || "3001");
+
+const subscribeToGlobalChannel = async () => {
+  await subscriberRedisClient.subscribe("global", (data) => {
+    const parsedData = JSON.parse(data);
+    RoomManager.getInstance().handleMessageFromGlobalChannel(parsedData);
+  });
+};
 
 const main = async () => {
   try {
     const wss = new WebSocketServer({
-      port: 3001,
+      port: PORT,
       verifyClient: (info, done) => {
         try {
           const queryParams = new URLSearchParams(info.req.url?.split("?")[1]);
@@ -35,7 +46,8 @@ const main = async () => {
         console.error("Error during connection handling:", error);
       }
     });
-    console.log("WebSocket server started on port 3001.");
+    console.log("WebSocket server started on port ", PORT);
+    subscribeToGlobalChannel();
   } catch (error) {
     console.log("Error occured :", error);
   }

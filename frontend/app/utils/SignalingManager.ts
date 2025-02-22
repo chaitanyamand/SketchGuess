@@ -1,4 +1,4 @@
-export const BASE_URL = "ws://localhost:3001";
+export const BASE_URL = "ws://localhost:80";
 
 export class SignalingManager {
   private ws: WebSocket;

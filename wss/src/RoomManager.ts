@@ -1,16 +1,22 @@
 import { RedisClientType } from "redis";
 import { User } from "./User";
-import { redisClient } from "./redis";
+import { publisherRedisClient, redisClient } from "./redis";
 import { getRandomPictionaryWord } from "./dictionary";
+import "crypto";
+import { UUID } from "crypto";
 
 export class RoomManager {
   private static instance: RoomManager;
   private room: Map<User, string> = new Map();
   private participants: Map<string, Set<User>> = new Map();
   private redisClient: RedisClientType;
+  private publisherRedisClient: RedisClientType;
+  private instanceID: UUID;
 
   private constructor() {
+    this.instanceID = crypto.randomUUID();
     this.redisClient = redisClient;
+    this.publisherRedisClient = publisherRedisClient;
   }
 
   public static getInstance() {
@@ -145,6 +151,12 @@ export class RoomManager {
 
   //TODO :Change the type of messageToBroadcast
   private broadcastToRoomExceptSender(roomId: string, messageToBroadcast: any, sender: User) {
+    const messageToPublish = {
+      ...messageToBroadcast,
+      global_room_id: roomId,
+      instance_id: this.instanceID,
+    };
+    this.publisherRedisClient.publish("global", JSON.stringify(messageToPublish));
     const allParticipants = this.participants.get(roomId);
     if (allParticipants) {
       [...allParticipants].filter((p) => p !== sender).forEach((p) => p.emit(messageToBroadcast));
@@ -153,6 +165,12 @@ export class RoomManager {
 
   //TODO :Change the type of messageToBroadcast
   private broadcastToRoom(roomId: string, messageToBroadcast: any) {
+    const messageToPublish = {
+      ...messageToBroadcast,
+      global_room_id: roomId,
+      instance_id: this.instanceID,
+    };
+    this.publisherRedisClient.publish("global", JSON.stringify(messageToPublish));
     const allParticipants = this.participants.get(roomId);
     if (allParticipants) {
       allParticipants.forEach((participant) => participant.emit(messageToBroadcast));
@@ -221,4 +239,17 @@ export class RoomManager {
     }
     await this.removeUserFromRoom(user);
   }
+
+  public handleMessageFromGlobalChannel = (parsedData: any) => {
+    const receivedInstanceId = parsedData.instance_id;
+    if (receivedInstanceId != this.instanceID) {
+      delete parsedData.instance_id;
+      const roomId = parsedData.global_room_id;
+      delete parsedData.global_room_id;
+      const allParticipants = this.participants.get(roomId);
+      if (allParticipants) {
+        allParticipants.forEach((participant) => participant.emit(parsedData));
+      }
+    }
+  };
 }
