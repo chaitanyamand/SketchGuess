@@ -76,4 +76,4 @@ Used to get game and room status while joining the room:
 
 ## Demo Video
 
-[![Watch the video](https://img.youtube.com/vi/kV0HQRxX6RA/maxresdefault.jpg)](https://youtu.be/kV0HQRxX6RA)
+[![Watch the video](https://i9.ytimg.com/vi_webp/kV0HQRxX6RA/mq3.webp?sqp=CIjC6L0G&rs=AOn4CLCQoLAAHtyjjt4QBU4QZDDNE2HpEw)](https://youtu.be/kV0HQRxX6RA)
