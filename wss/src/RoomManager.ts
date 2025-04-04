@@ -13,10 +13,21 @@ export class RoomManager {
   private publisherRedisClient: RedisClientType;
   private instanceID: UUID;
 
+  private logicalClock: number = 0;
+  private requestingCS: Map<string, boolean> = new Map();
+  private requestTimestamps: Map<string, number> = new Map();
+  private deferredResponses: Map<string, Set<string>> = new Map();
+  private receivedResponses: Map<string, Set<string>> = new Map();
+  private allNodes: Set<string> = new Set();
+  private nodeLastSeen: Map<string, number> = new Map();
+  private requestingUsers: Map<string, User> = new Map();
+
   private constructor() {
     this.instanceID = crypto.randomUUID();
     this.redisClient = redisClient;
     this.publisherRedisClient = publisherRedisClient;
+    this.startHeartbeat();
+    this.startNodeFailureDetection();
   }
 
   public static getInstance() {
@@ -24,6 +35,14 @@ export class RoomManager {
       RoomManager.instance = new RoomManager();
     }
     return RoomManager.instance;
+  }
+
+  private incrementClock(): number {
+    return ++this.logicalClock;
+  }
+
+  private updateClock(receivedTimestamp: number): void {
+    this.logicalClock = Math.max(this.logicalClock, receivedTimestamp) + 1;
   }
 
   public async addUserToRoom(user: User, roomId: string) {
@@ -111,6 +130,10 @@ export class RoomManager {
     const roomId = this.room.get(user) || "";
     const userName = user.getUserName();
     const correctAnswer = await this.redisClient.get(`answer:${roomId}`);
+    const drawer = await this.redisClient.get(`drawer:${roomId}`);
+    if (drawer && drawer == userName) {
+      return;
+    }
     if (correctAnswer && lowercaseChat == correctAnswer) {
       const allParticipants = this.redisClient.lRange(`participants:${roomId}`, 0, -1);
       const parsedAllParticipants = (await allParticipants).map((allParticipant) => JSON.parse(allParticipant));
@@ -147,9 +170,9 @@ export class RoomManager {
     await this.redisClient.del(`drawing:${roomId}`);
     await this.redisClient.del(`chat:${roomId}`);
     await this.redisClient.del(`drawer:${roomId}`);
+    await this.redisClient.del(`answer:${roomId}`);
   }
 
-  //TODO :Change the type of messageToBroadcast
   private broadcastToRoomExceptSender(roomId: string, messageToBroadcast: any, sender: User) {
     const messageToPublish = {
       ...messageToBroadcast,
@@ -163,7 +186,6 @@ export class RoomManager {
     }
   }
 
-  //TODO :Change the type of messageToBroadcast
   private broadcastToRoom(roomId: string, messageToBroadcast: any) {
     const messageToPublish = {
       ...messageToBroadcast,
@@ -177,7 +199,6 @@ export class RoomManager {
     }
   }
 
-  //TODO :Change the type of drawingData
   public async handleDrawingStroke(user: User, drawingData: any) {
     const roomId = this.room.get(user);
     if (!roomId) return;
@@ -194,8 +215,13 @@ export class RoomManager {
   }
 
   public async handleDrawingRequest(user: User) {
+    await this.requestDrawingRights(user);
+  }
+
+  public async requestDrawingRights(user: User): Promise<void> {
     const userName = user.getUserName();
     const roomId = this.room.get(user);
+
     if (!roomId) {
       user.emit({
         type: "DRAW_FAILURE",
@@ -203,25 +229,249 @@ export class RoomManager {
       });
       return;
     }
+
     const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
     if (drawerForRoom) {
       user.emit({
         type: "DRAW_FAILURE",
         message: "Someone is already drawing",
       });
-    } else {
-      const pictionary_word = getRandomPictionaryWord().toLowerCase();
-      await this.redisClient.set(`drawer:${roomId}`, userName);
-      await this.redisClient.set(`answer:${roomId}`, pictionary_word);
+      return;
+    }
+
+    if (this.requestingCS.get(roomId)) {
       user.emit({
-        type: "DRAW_SUCCESS",
-        pictionary_word,
+        type: "DRAW_FAILURE",
+        message: "Another user is currently requesting drawing rights",
       });
-      const messageToBroadcast = {
-        type: "DRAWER",
-        user_name: userName,
+      return;
+    }
+
+    this.requestingUsers.set(roomId, user);
+
+    this.requestingCS.set(roomId, true);
+    const timestamp = this.incrementClock();
+    this.requestTimestamps.set(roomId, timestamp);
+
+    this.receivedResponses.set(roomId, new Set<string>());
+
+    const requestMessage = {
+      type: "RA_REQUEST",
+      roomId: roomId,
+      nodeId: this.instanceID,
+      timestamp: timestamp,
+      userName: userName,
+    };
+    console.log("Sending Request", requestMessage);
+    await this.publisherRedisClient.publish("ra_channel", JSON.stringify(requestMessage));
+
+    this.checkAndEnterCS(roomId);
+  }
+
+  private async handleCSRequest(message: any): Promise<void> {
+    console.log("Handling Request", message);
+    const { roomId, nodeId, timestamp, userName } = message;
+    this.updateClock(timestamp);
+
+    const requestingThisRoom = this.requestingCS.get(roomId);
+    const ourTimestamp = this.requestTimestamps.get(roomId);
+
+    if (requestingThisRoom && ourTimestamp !== undefined) {
+      const wePriority = ourTimestamp < timestamp || (ourTimestamp === timestamp && this.instanceID < nodeId);
+
+      if (wePriority) {
+        let deferred = this.deferredResponses.get(roomId);
+        if (!deferred) {
+          deferred = new Set<string>();
+          this.deferredResponses.set(roomId, deferred);
+        }
+        deferred.add(nodeId);
+        return;
+      }
+    }
+
+    const responseMessage = {
+      type: "RA_RESPONSE",
+      roomId: roomId,
+      nodeId: this.instanceID,
+      requestNodeId: nodeId,
+    };
+
+    await this.publisherRedisClient.publish("ra_channel", JSON.stringify(responseMessage));
+  }
+
+  private handleCSResponse(message: any): void {
+    const { roomId, requestNodeId } = message;
+
+    if (requestNodeId === this.instanceID) {
+      console.log("Handling Response", message);
+      const responses = this.receivedResponses.get(roomId);
+      console.log("Responses :", responses);
+      if (responses) {
+        responses.add(message.nodeId);
+        this.checkAndEnterCS(roomId);
+      }
+    }
+  }
+
+  private async checkAndEnterCS(roomId: string): Promise<void> {
+    const responses = this.receivedResponses.get(roomId);
+    if (!responses) {
+      return;
+    }
+
+    const user = this.requestingUsers.get(roomId);
+    if (!user) {
+      return;
+    }
+
+    const userName = user.getUserName();
+
+    if (responses.size >= this.allNodes.size) {
+      this.requestingCS.set(roomId, false);
+      this.receivedResponses.delete(roomId);
+      this.requestingUsers.delete(roomId);
+
+      const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
+      if (!drawerForRoom) {
+        const pictionary_word = getRandomPictionaryWord().toLowerCase();
+        await this.redisClient.set(`drawer:${roomId}`, userName);
+        await this.redisClient.set(`answer:${roomId}`, pictionary_word);
+
+        user.emit({
+          type: "DRAW_SUCCESS",
+          pictionary_word,
+        });
+
+        const messageToBroadcast = {
+          type: "DRAWER",
+          user_name: userName,
+        };
+
+        this.broadcastToRoomExceptSender(roomId, messageToBroadcast, user);
+      }
+
+      const deferred = this.deferredResponses.get(roomId);
+      if (deferred) {
+        for (const nodeId of deferred) {
+          const responseMessage = {
+            type: "RA_RESPONSE",
+            roomId: roomId,
+            nodeId: this.instanceID,
+            requestNodeId: nodeId,
+          };
+
+          await this.publisherRedisClient.publish("ra_channel", JSON.stringify(responseMessage));
+        }
+        this.deferredResponses.delete(roomId);
+      }
+    }
+  }
+
+  public async releaseDrawingRights(roomId: string): Promise<void> {
+    await this.redisClient.del(`drawer:${roomId}`);
+    await this.redisClient.del(`answer:${roomId}`);
+
+    this.requestingCS.delete(roomId);
+    this.requestingUsers.delete(roomId);
+
+    const deferred = this.deferredResponses.get(roomId);
+    if (deferred) {
+      for (const nodeId of deferred) {
+        const responseMessage = {
+          type: "RA_RESPONSE",
+          roomId: roomId,
+          nodeId: this.instanceID,
+          requestNodeId: nodeId,
+        };
+
+        await this.publisherRedisClient.publish("ra_channel", JSON.stringify(responseMessage));
+      }
+      this.deferredResponses.delete(roomId);
+    }
+  }
+
+  public handleRAChannelMessage(message: string): void {
+    try {
+      const parsedMessage = JSON.parse(message);
+
+      if (parsedMessage.nodeId === this.instanceID) return;
+
+      this.allNodes.add(parsedMessage.nodeId);
+
+      switch (parsedMessage.type) {
+        case "RA_REQUEST":
+          this.handleCSRequest(parsedMessage);
+          break;
+        case "RA_RESPONSE":
+          this.handleCSResponse(parsedMessage);
+          break;
+        case "RA_NODE_ANNOUNCE":
+          break;
+      }
+    } catch (error) {
+      console.error("Error handling RA message:", error);
+    }
+  }
+
+  public async announcePresence(): Promise<void> {
+    const message = {
+      type: "RA_NODE_ANNOUNCE",
+      nodeId: this.instanceID,
+    };
+
+    await this.publisherRedisClient.publish("ra_channel", JSON.stringify(message));
+  }
+
+  private async startHeartbeat(): Promise<void> {
+    setInterval(async () => {
+      const heartbeat = {
+        type: "RA_HEARTBEAT",
+        nodeId: this.instanceID,
+        timestamp: Date.now(),
       };
-      this.broadcastToRoomExceptSender(roomId as string, messageToBroadcast, user);
+
+      await this.publisherRedisClient.publish("ra_heartbeat", JSON.stringify(heartbeat));
+    }, 5000);
+  }
+
+  public handleHeartbeat(message: string): void {
+    try {
+      const parsedMessage = JSON.parse(message);
+      if (parsedMessage.nodeId === this.instanceID) return;
+
+      this.nodeLastSeen.set(parsedMessage.nodeId, Date.now());
+      this.allNodes.add(parsedMessage.nodeId);
+    } catch (error) {
+      console.error("Error handling heartbeat:", error);
+    }
+  }
+
+  private startNodeFailureDetection(): void {
+    setInterval(() => {
+      const now = Date.now();
+      const failedNodes = [];
+
+      for (const [nodeId, lastSeen] of this.nodeLastSeen.entries()) {
+        if (now - lastSeen > 15000) {
+          failedNodes.push(nodeId);
+        }
+      }
+
+      for (const nodeId of failedNodes) {
+        this.handleNodeFailure(nodeId);
+      }
+    }, 5000);
+  }
+
+  private handleNodeFailure(nodeId: string): void {
+    console.log(`Node ${nodeId} failed`);
+    this.allNodes.delete(nodeId);
+    this.nodeLastSeen.delete(nodeId);
+
+    for (const [roomId, responses] of this.receivedResponses.entries()) {
+      responses.add(nodeId);
+      this.checkAndEnterCS(roomId);
     }
   }
 
@@ -229,6 +479,13 @@ export class RoomManager {
     const userName = user.getUserName();
     const roomId = this.room.get(user);
     if (!roomId) return;
+
+    if (this.requestingUsers.get(roomId) === user) {
+      this.requestingUsers.delete(roomId);
+      this.requestingCS.set(roomId, false);
+      this.receivedResponses.delete(roomId);
+    }
+
     const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
     if (drawerForRoom && drawerForRoom == userName) {
       await this.cleanupForRoom(roomId);

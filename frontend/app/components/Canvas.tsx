@@ -2,6 +2,7 @@ import { Stage, Layer, Line } from "react-konva"
 import { useRef, Dispatch, SetStateAction } from "react"
 import { DrawingStroke } from "../room/page"
 import { SignalingManager } from "../utils/SignalingManager"
+import { Undo } from "lucide-react";
 
 interface CanvasProps {
   isDrawingEnabled: boolean,

@@ -11,14 +11,12 @@ export class User {
     this.addListeners();
   }
 
-  //TODO :Change the type of message
   emit(message: any) {
     this.ws.send(JSON.stringify(message));
   }
 
   private addListeners() {
     this.ws.on("message", async (message: string) => {
-      //TODO :Change the type of param
       try {
         const parsedMessage = JSON.parse(message);
         if (parsedMessage.type == "CREATE") {

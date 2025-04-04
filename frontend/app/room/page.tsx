@@ -131,7 +131,6 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
         setDrawerStatus({someoneDrawing:true,userDrawing:false,otherUserDrawing:userName});
       },"DRAWER:ROOM");
       SignalingManager.getInstance(username).registerCallback("DRAWER_LEFT",() => {
-        toast(`${drawerStatus.otherUserDrawing} Left`);
         removeDrawer();
         setDrawing([]);
         setMessages([]);

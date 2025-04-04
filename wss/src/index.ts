@@ -5,10 +5,18 @@ import { RoomManager } from "./RoomManager";
 
 const PORT = parseInt(process.env.PORT || "3001");
 
-const subscribeToGlobalChannel = async () => {
+const subscribeToChannels = async () => {
   await subscriberRedisClient.subscribe("global", (data) => {
     const parsedData = JSON.parse(data);
     RoomManager.getInstance().handleMessageFromGlobalChannel(parsedData);
+  });
+
+  await subscriberRedisClient.subscribe("ra_channel", (data) => {
+    RoomManager.getInstance().handleRAChannelMessage(data);
+  });
+
+  await subscriberRedisClient.subscribe("ra_heartbeat", (data) => {
+    RoomManager.getInstance().handleHeartbeat(data);
   });
 };
 
@@ -47,9 +55,10 @@ const main = async () => {
       }
     });
     console.log("WebSocket server started on port ", PORT);
-    subscribeToGlobalChannel();
+    await subscribeToChannels();
+    await RoomManager.getInstance().announcePresence();
   } catch (error) {
-    console.log("Error occured :", error);
+    console.log("Error occurred:", error);
   }
 };
 
