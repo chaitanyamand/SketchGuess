@@ -103,6 +103,11 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
       )
     }
 
+    const showTimeoutToast = () => {
+      const message = drawerStatus.userDrawing == true ? "Uh Oh! You took a long time to draw" : "Uh Oh! You took a long time to guess";
+      toast(message);
+    }
+
     const attachWSListeners = (username: string) =>{
       SignalingManager.getInstance(username).registerCallback("SCORE",(participantUsername : string, correctWord:string) => {
         const nameToToast = participantUsername == username ? "You" : participantUsername;
@@ -124,6 +129,7 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
         toast.error(reasonMessage,{duration :4000});
       },"DRAW_FAILURE:ROOM");
       SignalingManager.getInstance(username).registerCallback("DRAW_SUCCESS",(pictionaryWord : string)=> {
+        toast.success("You have got 5 minutes to draw!")
         setDrawerStatus({someoneDrawing:true, userDrawing:true, otherUserDrawing:null});
         setPicWord(pictionaryWord);
       },"DRAW_SUCCESS:ROOM");
@@ -145,6 +151,13 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
         toast(`${userName} Joined`)
         addParticipant(userName);
       },"PARTICIPANT_JOINED:ROOM")
+      SignalingManager.getInstance(username).registerCallback("ROUND_TIMEOUT",() => {
+        showTimeoutToast();  
+        setDrawing([]);
+        setMessages([]);
+        setDrawerStatus({someoneDrawing:false, userDrawing:false, otherUserDrawing:null});
+        setPicWord(null);
+      }, "ROUND_TIMEOUT:ROOM");
     }
 
     useEffect(()=>{
@@ -161,6 +174,7 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
           SignalingManager.getInstance(username).deRegisterCallback("DRAWER_LEFT", "DRAWER_LEFT:ROOM"); 
           SignalingManager.getInstance(username).deRegisterCallback("PARTICIPANT_LEFT", "PARTICIPANT_LEFT:ROOM");
           SignalingManager.getInstance(username).deRegisterCallback("PARTICIPANT_JOINED", "PARTICIPANT_JOINED:ROOM");
+          SignalingManager.getInstance(username).deRegisterCallback("ROUND_TIMEOUT", "ROUND_TIMEOUT:ROOM");
         }
       };
     },[])

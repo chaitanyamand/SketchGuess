@@ -66,6 +66,8 @@ export class SignalingManager {
           } else if (type == "PARTICIPANT_JOINED") {
             const userName = message.user_name;
             callback(userName);
+          } else if (type == "ROUND_TIMEOUT") {
+            callback();
           }
         });
       }

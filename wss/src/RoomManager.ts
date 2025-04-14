@@ -145,6 +145,8 @@ export class RoomManager {
       await this.redisClient.lRem(`participants:${roomId}`, 0, JSON.stringify(oldParticipant));
       await this.redisClient.rPush(`participants:${roomId}`, JSON.stringify(newParticipant));
       await this.cleanupForRoom(roomId);
+      await this.releaseDrawingRights(roomId);
+
       const messageToBroadcast = {
         type: "SCORE",
         user_name: userName,
@@ -171,6 +173,7 @@ export class RoomManager {
     await this.redisClient.del(`chat:${roomId}`);
     await this.redisClient.del(`drawer:${roomId}`);
     await this.redisClient.del(`answer:${roomId}`);
+    await this.redisClient.del(`roomRound:${roomId}`);
   }
 
   private broadcastToRoomExceptSender(roomId: string, messageToBroadcast: any, sender: User) {
@@ -335,8 +338,23 @@ export class RoomManager {
       const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
       if (!drawerForRoom) {
         const pictionary_word = getRandomPictionaryWord().toLowerCase();
+        const roundId = crypto.randomUUID();
+        const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
         await this.redisClient.set(`drawer:${roomId}`, userName);
         await this.redisClient.set(`answer:${roomId}`, pictionary_word);
+        await this.redisClient.set(`roomRound:${roomId}`, roundId);
+
+        setTimeout(async () => {
+          const roundForRoom = await this.redisClient.get(`roomRound:${roomId}`);
+          if (roundForRoom && roundForRoom == roundId) {
+            const messageToBroadcast = {
+              type: "ROUND_TIMEOUT",
+            };
+            this.broadcastToRoom(roomId, messageToBroadcast);
+            this.cleanupForRoom(roomId);
+            await this.releaseDrawingRights(roomId);
+          }
+        }, FIVE_MINUTES_IN_MS);
 
         user.emit({
           type: "DRAW_SUCCESS",
@@ -349,21 +367,6 @@ export class RoomManager {
         };
 
         this.broadcastToRoomExceptSender(roomId, messageToBroadcast, user);
-      }
-
-      const deferred = this.deferredResponses.get(roomId);
-      if (deferred) {
-        for (const nodeId of deferred) {
-          const responseMessage = {
-            type: "RA_RESPONSE",
-            roomId: roomId,
-            nodeId: this.instanceID,
-            requestNodeId: nodeId,
-          };
-
-          await this.publisherRedisClient.publish("ra_channel", JSON.stringify(responseMessage));
-        }
-        this.deferredResponses.delete(roomId);
       }
     }
   }
@@ -489,6 +492,7 @@ export class RoomManager {
     const drawerForRoom = await this.redisClient.get(`drawer:${roomId}`);
     if (drawerForRoom && drawerForRoom == userName) {
       await this.cleanupForRoom(roomId);
+      await this.releaseDrawingRights(roomId);
       const messageToBroadcast = {
         type: "DRAWER_LEFT",
       };
