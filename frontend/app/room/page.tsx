@@ -28,6 +28,7 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
     const [drawing, setDrawing] = useState<Array<DrawingStroke>>([])
     const [picWord, setPicWord] = useState<string | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
+    const [endTime, setEndTime] = useState<number|null>(null);
     const router = useRouter();
     
     
@@ -113,6 +114,7 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
         const nameToToast = participantUsername == username ? "You" : participantUsername;
         toast.success(`${nameToToast} got it right! Word was ${correctWord}`)
         updateParticipantScore(participantUsername);
+        setEndTime(null);
         setDrawing([]);
         setMessages([]);
         setDrawerStatus({someoneDrawing:false, userDrawing:false, otherUserDrawing:null});
@@ -129,7 +131,10 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
         toast.error(reasonMessage,{duration :4000});
       },"DRAW_FAILURE:ROOM");
       SignalingManager.getInstance(username).registerCallback("DRAW_SUCCESS",(pictionaryWord : string)=> {
+        const roundTimeoutTime = Date.now() + 5 * 60 * 1000;
+
         toast.success("You have got 5 minutes to draw!")
+        setEndTime(roundTimeoutTime);
         setDrawerStatus({someoneDrawing:true, userDrawing:true, otherUserDrawing:null});
         setPicWord(pictionaryWord);
       },"DRAW_SUCCESS:ROOM");
@@ -152,7 +157,8 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
         addParticipant(userName);
       },"PARTICIPANT_JOINED:ROOM")
       SignalingManager.getInstance(username).registerCallback("ROUND_TIMEOUT",() => {
-        showTimeoutToast();  
+        showTimeoutToast(); 
+        setEndTime(null); 
         setDrawing([]);
         setMessages([]);
         setDrawerStatus({someoneDrawing:false, userDrawing:false, otherUserDrawing:null});
@@ -200,7 +206,7 @@ export default function GameRoom({ params }: { params: { roomId: string } }) {
     {
       return (<div className="min-h-screen bg-white text-black p-2">
         <div className="container mx-auto space-y-2">
-          <RoomStatus roomId={roomId} drawerStatus={drawerStatus} picWord={picWord} username={username} onJoinRequest={handleDrawRequest}/>
+          <RoomStatus roomId={roomId} drawerStatus={drawerStatus} picWord={picWord} username={username} onJoinRequest={handleDrawRequest} endTime={endTime}/>
   
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
             <div className="lg:col-span-3">
